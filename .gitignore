@@ -1,0 +1,8 @@
+# Large/derived/private data — regenerate with scripts/setup.sh and the pipeline
+work/
+models/
+fonts/
+input/
+output/
+__pycache__/
+*.pyc
