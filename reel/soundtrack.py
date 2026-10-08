@@ -602,6 +602,8 @@ def crackle_bed(n, seed=304):
     for rate, lo, hi in ((40, 0.04, 0.12), (8, 0.12, 0.25), (0.6, 0.25, 0.35)):
         for _ in range(r.poisson(rate * dur)):
             i = int(r.integers(0, n - 300))
+            if rate < 40 and (S(94) <= i < S(114) or S(132) <= i < S(140)):
+                continue                     # no loud pops while the designed sync sounds play
             m = int(r.integers(4, 40))
             b = int(r.integers(0, len(bands)))
             amp = r.uniform(lo, hi)
@@ -664,7 +666,7 @@ def breath_bed(seed=306):
     x *= (env * np.clip(turb, 0.5, 1.6))[:, None]
     x = fade(x, int(0.06 * SR), int(0.033 * SR))
     peak_frame = f0 + int(np.argmax(np.abs(x).max(1))) / SPF
-    return peak_to(x, -28.0), peak_frame
+    return peak_to(x, -22.0), peak_frame
 
 
 def riser(seed=307):
@@ -712,11 +714,13 @@ def glass_shimmer(seed=309, partials=(2093.0, 2637.0, 3136.0, 4186.0), rt=1.8):
     return peak_to(out, -22.0)
 
 
-def odometer_tick():
-    m = int(0.004 * SR)
+def odometer_tick(seed=317):
+    """Broadband mechanical click (clears the 2 kHz shimmer partials): 1.5 ms of 3-7 kHz noise + a 900 Hz body."""
+    m = int(0.012 * SR)
     t = np.arange(m) / SR
-    y = np.sin(2 * np.pi * 2000 * t) * np.hanning(m)
-    return peak_to(st(y), -32.0)
+    nz = filt(rng(seed).standard_normal(m + 2000), (3000, 7000), "band")[1000:1000 + m] * np.exp(-t / 0.0015)
+    body = np.sin(2 * np.pi * 900 * t) * np.exp(-t / 0.004) * 0.5
+    return peak_to(st(fade(nz / (np.abs(nz).max() + 1e-9) + body, 24, int(0.004 * SR))), -26.0)
 
 
 def reverse_celesta(pitches, n_frames, peak_db, seed, vel=72):
@@ -756,7 +760,7 @@ def snuff(seed=310):
     x = filt(pink(n + 4000, 2, seed), (700, 2500), "band")[2000:2000 + n]
     env = np.exp(-t / 0.028) * (1 + 0.25 * np.exp(-((t - 0.022) / 0.01) ** 2))
     x = width(x * env[:, None], 0.3)
-    return peak_to(fade(x, int(0.0015 * SR), int(0.02 * SR)), -20.0)
+    return peak_to(fade(x, int(0.0015 * SR), int(0.02 * SR)), -16.0)
 
 
 def sub_thump():
@@ -785,17 +789,17 @@ def ember_pans():
     """Pan each ping to its ember: replays the ember particle RNG of edit.py (fx.Particles, seed 3)."""
     r = rng(3)
     vx = []
-    for _ in range(7):
-        r.uniform(1.0, 1.4)
+    for _ in range(4):
+        r.uniform(0.8, 1.0)
         r.integers(1 << 30)
-        vx.append(r.uniform(-18, 18))
-        r.uniform(60, 120)
-        r.uniform(1.0, 2.5)
-        r.uniform(0.55, 0.95)
+        vx.append(r.uniform(-14, 14))
+        r.uniform(45, 65)
+        r.uniform(2.0, 3.5)
+        r.uniform(0.7, 1.0)
         r.uniform(0, 2 * np.pi)
         r.uniform(0.5, 1.5)
     wick = (585 - 540) / 540
-    return [float(np.clip(wick + v / 18 * 0.5, -0.6, 0.6)) for v in vx]
+    return [float(np.clip(wick + v / 14 * 0.5, -0.6, 0.6)) for v in vx]
 
 
 def ember_ping(freq, p):
@@ -835,6 +839,8 @@ def sfx_bus(variant):
 
     cr = crackle_bed(S(147))
     cr *= dbg(-36.0 - rms_db(cr[:S(140)]))
+    if not tonal:
+        cr = np.tanh(cr / dbg(-34.0)) * dbg(-34.0)       # soft-cap pops: nothing masks them in this variant
     cr = fade(cr, int(0.002 * SR), 0)
     out["crackle"] = place(z(), cr, 0)
 
@@ -846,8 +852,11 @@ def sfx_bus(variant):
 
     out["shimmer"] = place(z(), glass_shimmer(), S(103))
     x = z()
-    place(x, pan(odometer_tick(), 0.05), S(110))      # units digit flips (titles.odometer_clicks)
-    place(x, pan(odometer_tick(), -0.05), S(111))     # tens digit flips
+    from .titles import Titles
+
+    clicks = Titles((1080, 1920)).odometer_clicks       # the frames the numeral's digits visibly flip
+    place(x, pan(odometer_tick(317), 0.05), S(clicks["units"]))
+    place(x, pan(odometer_tick(318), -0.05), S(clicks["tens"]))
     out["odometer"] = x
 
     if tonal:
@@ -861,7 +870,7 @@ def sfx_bus(variant):
     out["loop_swell"] = place_end(z(), loop, N)
 
     x = z()
-    place(x, snuff(), S(DROP))
+    place(x, snuff(), S(DROP - 2))                     # the flame collapses on f138: puff, then the drop
     place(x, sub_thump(), S(DROP))
     out["snuff_sub"] = x
     out["bloom_whoosh"] = place(z(), bloom_whoosh(), S(DROP))
@@ -869,10 +878,10 @@ def sfx_bus(variant):
     x = z()
     pans = ember_pans()
     sfx_verb = make_ir(**SFX_ROOM)
-    for i, (f, fq) in enumerate(zip((146, 152, 159, 166, 175, 184), (6272.0, 5274.0, 5920.0, 6272.0, 5274.0, 6272.0))):
+    for i, (f, fq) in enumerate(zip((149, 153, 157, 160), (6272.0, 5274.0, 5920.0, 6272.0))):   # embers airborne
         place(x, peak_to(ember_ping(fq, pans[i]), -32.0), S(f))
     out["embers"] = peak_to(reverb(x, sfx_verb, 0.18), -32.0)       # -32 dBFS including the room send
-    out["glint"] = place(z(), title_glint(), S(200))
+    out["glint"] = place(z(), title_glint() * dbg(4.0), S(204))
     return out
 
 
@@ -1042,7 +1051,7 @@ def build(out_path, variant="full", target_lufs=None):
     target_lufs overrides the integrated target (default -14 full / -16 sfx_only)."""
     mix, stems = render_mix(variant)
     x, gr = bus_compressor(dc_block(mix, 15.0))                       # safety net: no DC / infrasonics
-    x = x * dbg(keys([(334, 0.0), (340, -6.0)]))[:, None]             # master dip over the last 6 frames
+    x = x * dbg(keys([(326, 0.0), (340, -14.0)]))[:, None]            # dip under the reverse swell into the loop
     x = x[:N]
     if target_lufs is None:
         target_lufs = -14.0 if variant == "full" else -16.0

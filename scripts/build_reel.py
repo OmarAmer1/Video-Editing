@@ -52,7 +52,7 @@ def main():
         if any([p.wait() for p in procs]):
             raise SystemExit("a render worker failed")
         subprocess.run(["ffmpeg", "-v", "error", "-y", "-framerate", "30", "-i", str(pngs / "%04d.png"),
-                        "-c:v", "libx264", "-preset", "slow", "-crf", "16", "-tune", "film", "-pix_fmt", "yuv420p",
+                        "-vf", "scale=out_color_matrix=bt709:out_range=tv", "-c:v", "libx264", "-preset", "slow", "-crf", "16", "-tune", "film", "-pix_fmt", "yuv420p",
                         "-profile:v", "high", "-color_primaries", "bt709", "-color_trc", "bt709",
                         "-colorspace", "bt709", "-movflags", "+faststart", str(video)], check=True)
     from reel import soundtrack

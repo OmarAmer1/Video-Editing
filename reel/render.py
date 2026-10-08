@@ -121,7 +121,9 @@ class Renderer:
                "-r", str(e.fps), "-i", "-"]
         if audio is not None:
             cmd += ["-i", str(audio)]
-        cmd += ["-c:v", "libx264", "-preset", "slow", "-crf", str(crf), "-tune", "film", "-pix_fmt", "yuv420p",
+        # convert RGB->YUV with the BT.709 matrix the stream is tagged with (ffmpeg defaults to BT.601)
+        cmd += ["-vf", "scale=out_color_matrix=bt709:out_range=tv",
+                "-c:v", "libx264", "-preset", "slow", "-crf", str(crf), "-tune", "film", "-pix_fmt", "yuv420p",
                 "-profile:v", "high", "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709",
                 "-movflags", "+faststart"]
         if audio is not None:

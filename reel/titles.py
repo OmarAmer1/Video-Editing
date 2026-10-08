@@ -7,7 +7,7 @@ Implements final_edl.json["typography"] (plus the TXT notes of the timeline):
            out f78-f90 (blur 0->8, opacity ->0, drift up 6 px, easeInCubic).
   numeral  '29' -> '30'        Instrument Serif Regular 200 px, #F2EDE4 @ 92 %, x 70, baseline 452.
            Rack focus in f20-f38 (blur 18->0, scale 1.06->1.00 about the glyph centre, opacity 0->0.92, easeOutCubic).
-           Odometer on fixed digit cells from the '30' layout: units '9'->'0' f106-f113, tens '2'->'3' f107-f114 (rolling together, so '20' never reads),
+           Odometer on fixed digit cells from the '30' layout: units '9'->'0' f104-f116, tens '2'->'3' f106-f118 (ease-in-out roll, 180-degree-shutter blur),
            easeInOutBack (overshoot 1.2), 12 px vertical motion blur at peak speed, clipped to the digit cell
            (figure height + 24 px). Recolour ivory -> candle gold #E8C78E gated by the colour-bloom value at the
            glyph centre and rate-limited to the f142-f150 ramp (the bloom front alone crosses it in ~1 frame), with an
@@ -59,7 +59,7 @@ SPEC = dict(
     kicker=dict(words=("one", "last", "wish", "at"), size=50, x=74, baseline=280, colour=KICKER_COL, opacity=0.92,
                 starts=(6, 10, 14, 18), dur=12, blur_in=10.0, rise=12.0, out=(78, 90), blur_out=8.0, drift=6.0),
     numeral=dict(size=200, x=70, baseline=452, opacity=0.92, rack=(20, 38), rack_blur=18.0, rack_scale=1.06,
-                 units=(106, 113), tens=(107, 114), overshoot=1.2, motion_blur=12.0, cell_margin=12.0,
+                 units=(104, 116), tens=(106, 118), overshoot=0.0, motion_blur=0.5, cell_margin=12.0,
                  cell_feather=4.0, recolour_fallback=(142, 150), pulse_centre=154, pulse_half=14,
                  exit=(186, 198), exit_blur=12.0, exit_scale=0.97),
     end1=dict(words=("happy", "birthday,"), size=56, x=74, baseline=284, colour=END_COL, opacity=0.95,
@@ -104,6 +104,18 @@ def ease_in_out_back(u, overshoot=1.2):
     if u < 0.5:
         return (2 * u) ** 2 * ((c2 + 1) * 2 * u - c2) / 2
     return ((2 * u - 2) ** 2 * ((c2 + 1) * (u * 2 - 2) + c2) + 2) / 2
+
+
+def ease_out_back(u, overshoot=0.0):
+    """Odometer roll: gentle start, gentle landing (ease-in-out cubic), optional small overshoot."""
+    u = _c01(u)
+    e = 4 * u ** 3 if u < 0.5 else 1 - (-2 * u + 2) ** 3 / 2
+    return e + overshoot * 0.1 * math.sin(math.pi * u) ** 2 * (u > 0.5)
+
+
+def _d_ease_out_back(u, overshoot=1.1, h=1e-4):
+    a, b = max(u - h, 0.0), min(u + h, 1.0)
+    return (ease_out_back(b, overshoot) - ease_out_back(a, overshoot)) / (b - a)
 
 
 def _d_ease_in_out_back(u, overshoot=1.2, h=1e-4):
@@ -295,13 +307,13 @@ class Titles:
 
         # peak |dE/du| of the odometer ease, to scale motion blur to 12 px at peak speed
         us = np.linspace(0, 1, 2001)
-        self._vmax = max(abs(_d_ease_in_out_back(u, n["overshoot"])) for u in us)
+        self._vmax = max(abs(_d_ease_out_back(u, n["overshoot"])) for u in us)
 
         # frames on which each odometer digit visibly 'clicks' over (first frame with eased progress >= 0.5), for the
         # sound design: units f110, tens f114 (the spec's ticks are f108 / f114; f108 is 2 frames before the
         # units digit moves: the back-ease is still in its dip at f107-f108)
         def click(w):
-            return next(k for k in range(w[0], w[1] + 1) if ease_in_out_back(prog(k, *w), n["overshoot"]) >= 0.5)
+            return next(k for k in range(w[0], w[1] + 1) if ease_out_back(prog(k, *w), n["overshoot"]) >= 0.5)
         self.odometer_clicks = {"units": click(n["units"]), "tens": click(n["tens"])}
 
         self._num_cache = {}
@@ -387,10 +399,10 @@ class Titles:
             p_in = ease_out_cubic(prog(k, *n["rack"]))
             q = ease_in_out_cubic(prog(k, *n["exit"]))
             uu, ut = prog(k, *n["units"]), prog(k, *n["tens"])
-            pu, pt = ease_in_out_back(uu, n["overshoot"]), ease_in_out_back(ut, n["overshoot"])
-            mb2 = n["motion_blur"] * self.s * SS / self._vmax
-            bu = mb2 * abs(_d_ease_in_out_back(uu, n["overshoot"])) if 0 < uu < 1 else 0.0
-            bt = mb2 * abs(_d_ease_in_out_back(ut, n["overshoot"])) if 0 < ut < 1 else 0.0
+            pu, pt = ease_out_back(uu, n["overshoot"]), ease_out_back(ut, n["overshoot"])
+            # 180-degree shutter: blur = motion_blur x the digit's travel this frame (2x px)
+            bu = n["motion_blur"] * self.pitch2 * abs(_d_ease_out_back(uu, n["overshoot"])) / (n["units"][1] - n["units"][0]) if 0 < uu < 1 else 0.0
+            bt = n["motion_blur"] * self.pitch2 * abs(_d_ease_out_back(ut, n["overshoot"])) / (n["tens"][1] - n["tens"][0]) if 0 < ut < 1 else 0.0
             spr = self._numeral_sprite(pu, pt, bu, bt)
             sc = (n["rack_scale"] + (1 - n["rack_scale"]) * p_in) * (1 + (n["exit_scale"] - 1) * q)
             centre = self._c29 if k < n["units"][0] else self._c30

@@ -267,14 +267,14 @@ def flame_mask(img, center, px=2.7, lum=0.78):
     return out
 
 
-def flame_glow(base, mask, strength=1.0, core=(1.0, 0.85, 0.55), inner=(1.0, 0.62, 0.25), outer=(1.0, 0.55, 0.2),
+def flame_glow(base, mask, strength=1.0, core=(1.0, 0.70, 0.32), inner=(1.0, 0.58, 0.20), outer=(1.0, 0.50, 0.16),
                px=2.7):
     """Re-light candle flames as warm amber emitters over `base` (e.g. the monochrome image)."""
     if strength <= 0 or mask.max() <= 0:
         return base
     m = mask[..., None] * strength
-    g = (cv2.GaussianBlur(mask, (0, 0), 5 * px)[..., None] * np.array(inner, np.float32) * 0.9 +
-         cv2.GaussianBlur(mask, (0, 0), 15 * px)[..., None] * np.array(outer, np.float32) * 0.6) * strength
+    g = (cv2.GaussianBlur(mask, (0, 0), 5 * px)[..., None] * np.array(inner, np.float32) * 1.6 +
+         cv2.GaussianBlur(mask, (0, 0), 15 * px)[..., None] * np.array(outer, np.float32) * 1.1) * strength
     lit = base * (1 - m * 0.7) + m * np.array(core, np.float32) * 0.9
     return screen(lit, g)
 
@@ -402,13 +402,32 @@ def _hex(h):
     return np.array([int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)], np.float32)
 
 
-def mono_silver(img, mix=(0.22, 0.50, 0.28), pts=((0, 0.04), (0.18, 0.15), (0.5, 0.48), (0.85, 0.84), (1, 0.95)),
-                shadow="#1C2026", highlight="#F1E4CF", split=0.12, halation=0.15, local_contrast=0.35, lc_radius=30):
-    """'Silver memory' monochrome: cool-ink shadows / warm-paper highlights.
+def hue_band(hsv, lo, hi, soft=8.0):
+    """Soft membership of HSV hue (degrees) in [lo, hi]; lo > hi wraps through 0."""
+    h = hsv[..., 0]
+    if lo <= hi:
+        return np.clip((h - lo) / soft, 0, 1) * np.clip((hi - h) / soft, 0, 1)
+    return np.maximum(np.clip((h - lo) / soft, 0, 1), np.clip((hi - h) / soft, 0, 1))
 
-    The channel mix leans on green/blue so her (warm) skin and the (lavender) hijab — nearly equal in plain
-    luminance — separate in grey; a broad local-contrast pass restores facial form lost to the upscaler."""
+
+def hijab_mask(img, hsv=None):
+    """Her dusty mauve-pink hijab: hue ~320-5 deg, low-mid saturation (lips/skin are far more saturated)."""
+    if hsv is None:
+        hsv = cv2.cvtColor(img.astype(np.float32), cv2.COLOR_RGB2HSV)
+    s, v = hsv[..., 1], hsv[..., 2]
+    return (hue_band(hsv, 318, 6, 10) * np.clip((s - 0.07) / 0.04, 0, 1) * np.clip((0.40 - s) / 0.06, 0, 1)
+            * np.clip((v - 0.30) / 0.08, 0, 1) * np.clip((0.86 - v) / 0.06, 0, 1)).astype(np.float32)   # not candle wax
+
+
+def mono_silver(img, mix=(0.40, 0.48, 0.12), pts=((0, 0.04), (0.18, 0.18), (0.45, 0.52), (0.75, 0.80), (1, 0.95)),
+                shadow="#1C2026", highlight="#F1E4CF", split=0.12, halation=0.15, local_contrast=0.15, lc_radius=30,
+                hijab_darken=0.26):
+    """'Silver memory' monochrome: luminous skin (red-leaning 'orange filter' portrait mix), the hijab gently
+    darkened by hue so face and scarf separate, cool-ink shadows / warm-paper highlights."""
     y = img[..., 0] * mix[0] + img[..., 1] * mix[1] + img[..., 2] * mix[2]
+    if hijab_darken > 0:
+        sig = 3.0 * img.shape[1] / 464                       # smooth over compression blocks
+        y = y * (1 - hijab_darken * cv2.GaussianBlur(hijab_mask(img), (0, 0), sig))
     if local_contrast > 0:
         r = lc_radius * img.shape[1] / 1080
         y = y + (y - cv2.GaussianBlur(y, (0, 0), r)) * local_contrast
@@ -416,7 +435,6 @@ def mono_silver(img, mix=(0.22, 0.50, 0.28), pts=((0, 0.04), (0.18, 0.15), (0.5,
     base = np.repeat(y[..., None], 3, -1)
     sh, hi = _hex(shadow), _hex(highlight)
     w = y[..., None]
-    # split-tone: blend toward the shadow ink in the darks and the paper tone in the lights
     toned = base * (1 - split) + split * (base * (hi / hi.max()) * w + (sh + base * (1 - sh)) * (1 - w))
     out = np.clip(toned, 0, 1)
     if halation > 0:
@@ -443,7 +461,7 @@ def film_gate_rect(img, inset, radius, feather=4.0, outside=(0.039, 0.039, 0.043
     return img * m[..., None] + np.array(outside, np.float32) * (1 - m[..., None])
 
 
-def present_grade_v2(img, warmth=0.015, pts=((0, 0.025), (0.18, 0.16), (0.5, 0.52), (0.82, 0.86), (1, 0.97)),
+def present_grade_v2(img, warmth=0.008, pts=((0, 0.025), (0.18, 0.16), (0.5, 0.52), (0.82, 0.86), (1, 0.97)),
                      sky="#0B1220", halation=0.18, bloom_amt=0.12):
     """'Golden present' night grade with hue-qualified protection:
     lavender hijab (hue 270-320) keeps its exact hue/saturation, skin (15-35) +4% sat,
@@ -459,13 +477,13 @@ def present_grade_v2(img, warmth=0.015, pts=((0, 0.025), (0.18, 0.16), (0.5, 0.5
     out = out * (1 - d * 0.5) + _hex(sky) * d * 0.5
     # hue-qualified saturation
     band = lambda lo, hi, soft=8: np.clip((hue - lo) / soft, 0, 1) * np.clip((hi - hue) / soft, 0, 1)
-    skin = band(15, 35)
-    lights = band(30, 60) * np.clip((y0 - 0.6) / 0.15, 0, 1)
-    gain = 1 - 0.04 * skin + 0.10 * lights
+    skin = band(8, 38) * np.clip((sat - 0.35) / 0.1, 0, 1)
+    lights = band(30, 60) * np.clip((y0 - 0.6) / 0.15, 0, 1) * (1 - skin)
+    gain = 1 - 0.15 * skin + 0.10 * lights
     yy = luma(out)[..., None]
     out = yy + (out - yy) * gain[..., None]
     # lock the hijab: restore its original chroma relative to the graded lightness
-    hij = (band(270, 320, 10) * np.clip((sat - 0.05) / 0.05, 0, 1))[..., None]
+    hij = cv2.GaussianBlur(hijab_mask(img, hsv), (0, 0), 2.0 * img.shape[1] / 464)[..., None]
     if hij.max() > 0:
         y_in = y0[..., None]
         restored = yy + (img - y_in)            # original chroma on graded luma

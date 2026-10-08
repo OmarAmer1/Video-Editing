@@ -65,17 +65,36 @@ class Clip:
         i = int(np.clip(i, 0, self.n - 1))
         return cv2.imread(str(paths.matte_dir(self.name) / self.files[i].name), 0).astype(np.float32) / 255
 
+    GRID = 16   # sub-frame grid built by recursive RIFE midpoints (RIFE's arbitrary-t output is not
+                # linear in time: t=0.125 moves ~1-3%, t=0.875 ~99%, which makes slow motion stutter)
+
     def frame(self, f, ensemble=False):
         f = float(np.clip(f, 0, self.n - 1))
         i0 = int(np.floor(f + 1e-6))
-        t = round(f - i0, 4)
-        if t < 0.02 or i0 >= self.n - 1:
+        if i0 >= self.n - 1:
+            return self.exact(self.n - 1)
+        q = (f - i0) * self.GRID
+        j0 = int(np.floor(q + 1e-4))
+        w = q - j0
+        if w < 0.02:
+            return self._grid(i0, j0, ensemble)
+        if w > 0.98:
+            return self._grid(i0, j0 + 1, ensemble)
+        return self._grid(i0, j0, ensemble) * (1 - w) + self._grid(i0, j0 + 1, ensemble) * w
+
+    def _grid(self, i0, j, ensemble):
+        if j <= 0:
             return self.exact(i0)
-        if t > 0.98:
+        if j >= self.GRID:
             return self.exact(i0 + 1)
-        key = (i0, round(t, 3), ensemble)
+        key = (i0, j, ensemble)
         if key not in self._interp:
-            self._interp[key] = self.rife.interpolate(self.exact(i0), self.exact(i0 + 1), t, ensemble=ensemble)
+            for k in [k for k in self._interp if k[0] < i0 - 1 or k[0] > i0 + 2]:   # keep memory bounded
+                del self._interp[k]
+            step = j & -j                                   # largest power of two dividing j
+            a = self._grid(i0, j - step, ensemble)
+            b = self._grid(i0, j + step, ensemble)
+            self._interp[key] = self.rife.interpolate(a, b, 0.5, ensemble=ensemble).astype(np.float32)
         return self._interp[key]
 
     def matte_at(self, f):

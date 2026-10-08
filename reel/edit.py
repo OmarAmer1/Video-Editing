@@ -30,16 +30,16 @@ CFG = dict(
     morph=(96, 110), pair=(39, 61),              # morph frames; exact source frames C39 <-> B61
     reg=(0.40, 3.20), prewarp=(1.90, 3.20),      # registration and body pre-warp windows (seconds)
     cam0=(1.08, 232, 404, 0.0), cam1=(1.12, 230, 430, -1.6),
-    camB=[(3.20, 1.12, 230, 430, -1.6), (3.6667, 1.12, 230, 430, -1.6), (4.6667, 1.135, 230, 428, -1.6),
+    camB=[(3.20, 1.12, 230, 430, -1.6), (3.6667, 1.12, 230, 430, -1.6), (4.6667, 1.15, 230, 428, -1.6),
           (5.3333, 1.11, 229, 428, -1.6), (6.6667, 1.12, 228, 426, -1.6), (10.6, 1.155, 225, 418, -1.6),
           (11.3333, 1.165, 225, 417, -1.6)],
     settle=(0.40, 1.16),                          # opening settle: duration (s), start scale
     candle_ellipse=((228, 430), (45, 50), 20),    # B-space candle region for the fast digit switch
     glow_peak=103, flare=(132, 136), drop=140,
-    bloom1=(110, 128, 120), bloom2=(140, 159, 150, 1250), gate=(140, 152),
+    bloom1=(110, 120, 110), bloom2=(140, 159, 150, 1250), gate=(140, 152),
     luma_lut=(72, 96),
-    defocus=[(0, 6.0), (8, 0.0), (72, 0.0), (96, 2.0), (140, 2.0), (148, 0.0), (200, 0.0), (260, 4.0), (340, 4.0)],
-    embers=(141, 7), leak_in=(0, 4), leak_out=(330, 339),
+    defocus=[(0, 10.0), (3, 5.0), (8, 0.0), (72, 0.0), (96, 2.0), (140, 2.0), (148, 0.0), (200, 0.0), (260, 4.0), (340, 4.0)],
+    embers=(141, 4), leak_in=(0, 4), leak_out=(330, 339),
 )
 
 
@@ -207,13 +207,30 @@ class Edit:
         M = R.canvas @ Mo
         size = (R.cw, R.ch)
         slow = t * self.fps > self.cfg["morph"][1] and self.r30.speed(t) < 0.2
-        img = cv2.warpAffine(c30.frame(f, ensemble=slow), M[:2], size, flags=cv2.INTER_CUBIC,
-                             borderMode=cv2.BORDER_REFLECT101)
+        src = c30.frame(f, ensemble=slow)
+        if 66.2 < f < 72.0:
+            src = self._unflare(src, f)
+        img = cv2.warpAffine(src, M[:2], size, flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT101)
         m = cv2.warpAffine(c30.matte_at(f), M[:2], size, flags=cv2.INTER_LINEAR)
         tips = [(Mo @ np.array([p[0], p[1], 1.0]))[:2] for p in flame_tips(self.geo, "c30", f)]
         cc = self.geo.candle("c30", f)
         self._centre = (Mo @ np.array([cc[0], cc[1] - 4.0, 1.0]))[:2]
         return img, m, tips
+
+    def _unflare(self, src, f, ref=73):
+        """After the blow-out the real flame flickers back for a few frames (B68-B69); the story says it is out,
+        so the wick region is replaced by the same region from B73 (flame fully out), aligned on the candle track."""
+        c30 = Clip("c30")
+        d = self.geo.candle("c30", f) - self.geo.candle("c30", ref)
+        refimg = cv2.warpAffine(c30.exact(ref), np.float32([[1, 0, d[0]], [0, 1, d[1]]]), (SRC_W, SRC_H),
+                                flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT101)
+        tip = flame_tips(self.geo, "c30", f)[-1]
+        Y, X = np.mgrid[0:SRC_H, 0:SRC_W].astype(np.float32)
+        dist = np.sqrt((X - tip[0]) ** 2 + ((Y - (tip[1] + 3)) * 0.8) ** 2)
+        m = np.clip((15 - dist) / 6 + 0.5, 0, 1)
+        ramp = float(np.interp(f, [66.2, 66.8, 71.2, 72.0], [0, 1, 1, 0]))
+        m = (m * ramp)[..., None]
+        return src * (1 - m) + refimg * m
 
     def morph_weight_map(self, R, u):
         """Content weight: smootherstep(u) everywhere, but the candle ellipse switches fast around u=0.5."""
@@ -226,7 +243,7 @@ class Edit:
         Rm = np.clip((1.0 - d) * ax / feather + 0.5, 0, 1)
         Rm = cv2.GaussianBlur(Rm, (0, 0), 6 * sc)
         wg = float(fx.smootherstep(u))
-        wc = float(fx.smootherstep((u - 0.393) / 0.214))
+        wc = float(fx.smootherstep((u - 0.33) / 0.34))          # digits switch over ~f100.6-f105.4, under the flash
         return (wg * (1 - Rm) + wc * Rm).astype(np.float32)
 
     def compose(self, t, R):
@@ -235,10 +252,11 @@ class Edit:
         ci, bi = self.cfg["pair"]
         if k < m0:
             f = self.r29(t)
-            if k <= 8:   # 3-sample motion blur through the opening settle
-                imgs = [self._c_composite(R, t + d / self.fps, f) for d in (-1 / 3, 0, 1 / 3)]
-                out = sum(x[0] for x in imgs) / 3
-                _, fm, tips = imgs[1]
+            if k <= 8:   # motion blur through the opening settle (many taps while the zoom is fastest)
+                taps = np.linspace(-0.25, 0.25, 9) if k <= 4 else np.array([-1 / 3, 0, 1 / 3])
+                imgs = [self._c_composite(R, t + d / self.fps, f) for d in taps]
+                out = sum(x[0] for x in imgs) / len(imgs)
+                _, fm, tips = imgs[len(imgs) // 2]
             else:
                 out, fm, tips = self._c_composite(R, t, f)
             return out, fm, dict(tips=tips, flame=flame_alive("c29", f)), 0.0, [dict(clip="c29", f=f)]
@@ -270,34 +288,51 @@ class Edit:
     # ------------------------------------------------------------------ look
     def colour_mask(self, k, img, centre, wick):
         """0 = silver memory, 1 = golden present.
-        Stage 1 (f110-128): only the new '30' candle and the cake top are born in colour (the hijab behind is
-        excluded by hue so no lavender patch appears). Stage 2 (the drop, f140+): colour radiates from the wick
-        across the whole frame with a soft light ring on its front."""
+        Stage 1 (f110-120): the new '30' candle and the cake-top decoration turn colour as one object (keyed by
+        wax brightness / berry red / gold leaf inside a small ellipse; the hijab and hands stay silver).
+        Stage 2 (the drop, f140+): colour radiates from the wick across the whole frame."""
         c = self.cfg
-        shape = img.shape
-        H, W = shape[:2]
+        H, W = img.shape[:2]
         m = np.zeros((H, W), np.float32)
-        ring = None
         b0, b1, r1 = c["bloom1"]
         if k >= b0:
-            u = min((k - b0) / (b1 - b0), 1.0)
-            rr = r1 * self.s * float(fx.ease_out_cubic(u)) + 1e-3
+            a = float(fx.smoothstep((k - b0) / (b1 - b0)))
             yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
-            d = np.sqrt(((xx - centre[0]) / 1.0) ** 2 + ((yy - centre[1]) / 0.8) ** 2)
-            local = np.clip((rr - d) / max(rr * 0.45, 1) + 0.5, 0, 1)
+            rr = r1 * self.s
+            d = np.sqrt(((xx - centre[0]) / 1.0) ** 2 + ((yy - centre[1]) / 0.85) ** 2)
+            ell = np.clip((rr - d) / (0.35 * rr) + 0.5, 0, 1)
             hsv = cv2.cvtColor(img.astype(np.float32), cv2.COLOR_RGB2HSV)
-            hue, sat = hsv[..., 0], hsv[..., 1]
-            hijab = np.clip((hue - 255) / 12, 0, 1) * np.clip((330 - hue) / 12, 0, 1)
-            local *= (1 - hijab) * np.clip((sat - 0.06) / 0.12, 0, 1)
-            m = np.maximum(m, cv2.GaussianBlur(local, (0, 0), 3 * self.s))
+            sat, val = hsv[..., 1], hsv[..., 2]
+            wax = np.clip((val - 0.74) / 0.06, 0, 1) * np.clip((0.45 - sat) / 0.1, 0, 1)
+            berry = fx.hue_band(hsv, 340, 14, 6) * np.clip((sat - 0.45) / 0.1, 0, 1)
+            gold = fx.hue_band(hsv, 32, 66, 6) * np.clip((sat - 0.35) / 0.1, 0, 1) * np.clip((val - 0.45) / 0.1, 0, 1)
+            obj = np.maximum(np.maximum(wax, berry), gold) * ell * (1 - fx.hijab_mask(img, hsv))
+            obj = cv2.GaussianBlur(cv2.dilate(obj, np.ones((3, 3), np.uint8)), (0, 0), 1.5 * self.s * 2)
+            m = np.maximum(m, np.clip(obj * 1.3, 0, 1) * a)
         d0, d1, ra, rb = c["bloom2"]
         if k >= d0:
             u = min((k - d0) / (d1 - d0), 1.0)
             Rr = (ra + (rb - ra) * float(fx.ease_in_out_sine(u) * 0.35 + fx.ease_out_cubic(u) * 0.65)) * self.s
-            m = np.maximum(m, fx.radial_mask(shape, wick, Rr, feather=0.45))
-            if u < 1:
-                ring = fx.ring(shape, wick, Rr * 0.85, 40 * self.s, color=(1.0, 0.886, 0.69), strength=0.22 * (1 - u))
-        return np.clip(m, 0, 1), ring
+            m = np.maximum(m, fx.radial_mask(img.shape, wick, Rr, feather=0.45))
+        return np.clip(m, 0, 1), None
+
+    def _candle_flash(self, out, e):
+        s = self.s
+        H, W = out.shape[:2]
+        t = self.cfg["morph"][0] / self.fps
+        cc = self.geo.candle("c30", float(self.cfg["pair"][1]))
+        p = self.camB(t) @ stabilizer(self.an, "c30", float(self.cfg["pair"][1]), 61) @ np.array([cc[0], cc[1], 1.0])
+        yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+        d = np.sqrt(((xx - p[0]) / (125 * s)) ** 2 + ((yy - p[1]) / (110 * s)) ** 2)
+        ell = cv2.GaussianBlur(np.clip((1 - d) / 0.45 + 0.5, 0, 1), (0, 0), 12 * s)[..., None]
+        soft = cv2.GaussianBlur(out, (0, 0), max(4 * s * e, 0.1))                       # A: local defocus
+        a = min(1.5 * e, 1.0)
+        out = out * (1 - ell * a) + soft * ell * a
+        warm = fx._hex("#FFE9C8")
+        hl = cv2.GaussianBlur(np.clip(fx.luma(out) - 0.55, 0, 1), (0, 0), 20 * s)[..., None]  # B: highlight bloom
+        out = fx.add_light(out, hl * warm * 2.0 * e)
+        out = fx.add_light(out, ell * warm * 0.6 * e)                                       # C: flat warm lift
+        return out
 
     def wick_at_drop(self):
         """Output-pixel position of the 30 flame tip on the drop frame (deterministic, for chunked renders)."""
@@ -392,19 +427,27 @@ class Edit:
                 gain = 1 + 0.45 * g * fx.radial_glow(img.shape, gc, 110 * s, color=(1, 1, 1), strength=1.0)
                 out = np.clip(out * gain, 0, 1)
 
+        # candle flash: the digits switch inside a burst of candle light sized to the digit pair, so no
+        # in-between number (39 / 20) is readable; it lands on the glass-shimmer hit at f103
+        if 100 <= k <= 106:
+            e = float(np.interp(k, [100, 102, 103, 104, 106], [0, 0.8, 1.0, 0.8, 0]))
+            if e > 0:
+                out = self._candle_flash(out, e)
+
         # embers rising from the extinguished wick
         e0, ne = c["embers"]
         if k >= e0:
             if not hasattr(self, "_embers"):
                 self._embers = fx.Particles(
-                    ne, 3, spawn=lambda r, i: e0 / self.fps + 0.05 + 0.09 * i, life=lambda r: r.uniform(1.0, 1.4),
-                    vel=lambda r: (r.uniform(-18, 18) * s, -r.uniform(60, 120) * s),
-                    size=lambda r: r.uniform(1.0, 2.5) * s, color=lambda r: (1.0, 0.76, 0.48),
-                    opacity=lambda r: r.uniform(0.55, 0.95), sway=6 * s)
+                    ne, 3, spawn=lambda r, i: e0 / self.fps + 0.05 + 0.12 * i, life=lambda r: r.uniform(0.8, 1.0),
+                    vel=lambda r: (r.uniform(-14, 14) * s, -r.uniform(45, 65) * s),
+                    size=lambda r: r.uniform(2.0, 3.5) * s, color=lambda r: (1.0, 0.69, 0.38),
+                    opacity=lambda r: r.uniform(0.7, 1.0), sway=5 * s)
                 self._ember_origin = (wick[0], wick[1] - 6 * s)
             o = self._ember_origin
             rgb, _ = self._embers.render(img.shape, t, lambda q, r: (o[0] + r.uniform(-6, 6) * s, o[1] + r.uniform(-4, 4) * s))
-            out = fx.add_light(out, rgb * 1.3)
+            halo = cv2.GaussianBlur(rgb, (0, 0), 6 * s) * np.array(fx._hex("#FFB060")) * 2.5
+            out = fx.add_light(out, rgb * 1.3 + halo)
 
         # typography (before grain, so it lives in the film)
         if self.titles is not None:
@@ -420,9 +463,13 @@ class Edit:
         # loop seam: warm candle-coloured leak from lower-left, decaying on f0-4 and building on f330-339
         li0, li1 = c["leak_in"]
         lo0, lo1 = c["leak_out"]
-        lk = 0.55 * max(1 - (k - li0) / (li1 - li0), 0) + 0.55 * fx.ramp(k, lo0, lo1)
+        lk = 0.8 * max(1 - k / 3.0, 0) ** 2 + 0.8 * max((k - 334) / 5.0, 0) ** 2
         if lk > 0:
-            out = fx.add_light(out, fx.light_leak(img.shape, t, seed=4, strength=lk, color=(1.0, 0.70, 0.42), pos=(0.12, 0.85)))
+            out = fx.add_light(out, fx.light_leak(img.shape, t, seed=4, strength=lk, color=(1.0, 0.70, 0.42),
+                                                  pos=(0.35, 0.6), scale=1.6))
+        flash = 0.35 * max(1 - k / 2.0, 0) ** 2 + 0.35 * max((k - 336) / 3.0, 0) ** 2
+        if flash > 0:
+            out = fx.add_light(out, np.ones_like(out[..., :1]) * np.array(fx._hex("#FFC48A")) * flash)
 
         # film: smooth flicker, vignette, grain 16mm -> 35mm through the colour mask, then the gate
         cm3 = cmask[..., None]
@@ -437,6 +484,8 @@ class Edit:
             if k < g0:
                 dx, dy = fx.gate_weave(k, amp=0.8 * s)
                 out = cv2.warpAffine(out, np.float32([[1, 0, dx], [0, 1, dy]]), (W, H), borderMode=cv2.BORDER_REFLECT101)
+            gi = float(fx.ease_out_cubic(k / 5.0)) if k < 5 else 1.0      # gate closes in at the loop restart
+            go = 1 - (1 - go) * gi
             out = fx.film_gate_rect(out, inset=26 * s * (1 - go) - 90 * s * go, radius=56 * s * (1 - go), feather=4 * s)
         # +-1 LSB triangular dither
         r = np.random.default_rng(1000 + k)
