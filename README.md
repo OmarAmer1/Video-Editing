@@ -1,5 +1,10 @@
 # Thirty, in One Breath — a 29 → 30 birthday reel
 
+**Deliverables** (`deliverables/`):
+- `reel_29_to_30.mp4`: the final reel (1080×1920, 30 fps, 11.3 s, original score, −14 LUFS).
+- `reel_29_to_30_no_music.mp4`: same picture with sound design only (−20 LUFS), for adding a song inside Instagram.
+- `reel_cover.jpg`: suggested Instagram cover (frame 300).
+
 A reproducible pipeline that turns two short phone clips (blowing out a **29** candle, then a **30** candle,
 filmed from different distances) into a 1080×1920 Instagram Reel with a seamless 29 → 30 transformation.
 
