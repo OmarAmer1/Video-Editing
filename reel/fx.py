@@ -267,15 +267,24 @@ def flame_mask(img, center, px=2.7, lum=0.78):
     return out
 
 
-def flame_glow(base, mask, strength=1.0, core=(1.0, 0.70, 0.32), inner=(1.0, 0.58, 0.20), outer=(1.0, 0.50, 0.16),
+def flame_glow(base, mask, strength=1.0, core=(1.0, 0.66, 0.28), inner=(1.0, 0.58, 0.20), outer=(1.0, 0.50, 0.16),
                px=2.7):
-    """Re-light candle flames as warm amber emitters over `base` (e.g. the monochrome image)."""
+    """Re-light candle flames as amber emitters over `base` (e.g. the monochrome image).
+
+    The flame is colourised *keeping its luminance* (an additive tint would just push the already-white
+    flame further to white), with a small white-hot centre, then a warm two-radius glow is screened on top."""
     if strength <= 0 or mask.max() <= 0:
         return base
-    m = mask[..., None] * strength
+    m = np.clip(mask * min(strength, 1.0), 0, 1)
+    y = luma(base)[..., None]
+    col = np.clip(y * 1.05 * np.array(core, np.float32), 0, 1)
+    k = max(int(2 * px) | 1, 3)
+    hot = cv2.GaussianBlur(cv2.erode(mask, np.ones((k, k), np.uint8)), (0, 0), max(px * 0.8, 0.5)) ** 2
+    hot = hot[..., None]
+    col = col * (1 - 0.45 * hot) + np.array((1.0, 0.90, 0.66), np.float32) * 0.45 * hot
+    lit = base * (1 - m[..., None]) + col * m[..., None]
     g = (cv2.GaussianBlur(mask, (0, 0), 5 * px)[..., None] * np.array(inner, np.float32) * 1.6 +
          cv2.GaussianBlur(mask, (0, 0), 15 * px)[..., None] * np.array(outer, np.float32) * 1.1) * strength
-    lit = base * (1 - m * 0.7) + m * np.array(core, np.float32) * 0.9
     return screen(lit, g)
 
 

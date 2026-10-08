@@ -229,7 +229,10 @@ class Edit:
         dist = np.sqrt((X - tip[0]) ** 2 + ((Y - (tip[1] + 3)) * 0.8) ** 2)
         m = np.clip((15 - dist) / 6 + 0.5, 0, 1)
         ramp = float(np.interp(f, [66.2, 66.8, 71.2, 72.0], [0, 1, 1, 0]))
-        m = (m * ramp)[..., None]
+        # replace only the hot (flame) pixels, so faint smoke around the wick survives
+        excess = fx.luma(src) - fx.luma(refimg)
+        hot = cv2.GaussianBlur(np.clip((excess - 0.04) / 0.12, 0, 1), (0, 0), 2.0)
+        m = (m * np.maximum(hot, 0.15 * m) * ramp)[..., None]
         return src * (1 - m) + refimg * m
 
     def morph_weight_map(self, R, u):
