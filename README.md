@@ -35,6 +35,18 @@ original edit) jumps; a face-locked cross-fade makes the hotel slide. Instead:
 4. **Colour separated from geometry.** Nothing changes colour while geometry moves: the 30 candle is born in
    colour after the morph, and the full colour bloom happens on the real flame-out.
 
+## How it was made
+
+1. **Analysis** of both takes: face landmarks, person mattes, camera shake, candle and flame tracking, and the
+   exact frames where each flame dies (29: C41, 30: B66).
+2. **Design panel**: four independent edit concepts (cinematic, trend, editorial, magical) scored by three judges
+   (client intent, Instagram craft, technical feasibility) and merged into one shot list.
+3. **Build** of the pipeline below, with the soundtrack and typography modules each built and independently verified.
+4. **Adversarial QA** of a proxy by four reviewers (transition, craft, artefacts, A/V sync), every major finding
+   re-verified before fixing. Fixes included linear RIFE slow motion (recursive midpoints), amber flame re-lighting,
+   a digit-sized candle flash over the 29→30 hand-off, painting out the 30 wick's post-blow-out re-flare, skin/hijab
+   colour protection, a BT.709-correct encode, and frame-accurate sound sync.
+
 ## Pipeline
 
 ```
