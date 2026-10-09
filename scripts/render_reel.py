@@ -16,7 +16,8 @@ def main():
     ap.add_argument("--audio", default=None)
     ap.add_argument("--gan-detail", type=float, default=0.7)
     ap.add_argument("--no-titles", action="store_true", help="clean master without typography")
-    ap.add_argument("--name", default=None, help="replace 'my love.' with her name")
+    ap.add_argument("--end-card", action="store_true", help="add the 'happy birthday, my love.' end card")
+    ap.add_argument("--name", default=None, help="end card with her name instead of 'my love.' (implies --end-card)")
     ap.add_argument("--png-dir", default=None, help="write lossless PNG frames here instead of encoding")
     ap.add_argument("--threads", type=int, default=0, help="torch threads (0 = default)")
     a = ap.parse_args()
@@ -31,7 +32,7 @@ def main():
     if not a.no_titles:
         from reel.titles import Titles
 
-        titles = Titles(cfg["out_size"], name=a.name)
+        titles = Titles(cfg["out_size"], name=a.name, end_card=a.end_card or a.name is not None)
     E = edit.Edit(analyze.load(), cfg, titles=titles)
     rife = fr.load_rife()
     clips = {"c29": fr.Clip("c29", rife), "c30": fr.Clip("c30", rife)}

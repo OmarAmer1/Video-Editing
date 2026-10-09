@@ -15,7 +15,8 @@ PRESENT   felt grand (one channel of the FluidR3 stereo pair: mono-safe) + celes
           Hall 2.4 s 20 %; LPF opens 3.2 -> 18 kHz and width 0.2 -> 1.0 over f140-f149; ~-12.5 LUFS.
 SFX       needle tick + projector clack f0, settle whoosh, crackle bed, inhale, pucker-driven breath bed,
           riser, harp gliss, glass shimmer f103, odometer ticks, reverse-celesta swells, pre-drop duck,
-          snuff + G1 sub f140, bloom whoosh, ember pings, title glint f200, loop reverse swell, end dip.
+          snuff + G1 sub f140, bloom whoosh, ember pings, title glint f200 (only with the end card),
+          loop reverse swell, end dip.
 AMBIENCE  29.mov (HPF/LPF 2.5 kHz, -38 LUFS, f0-f140) crossfading into 30.mov (from B61, natural
           speed, full band, -34 LUFS) over f136-f146.
 
@@ -824,8 +825,9 @@ def title_glint(seed=312):
     return peak_to(x, -28.0)
 
 
-def sfx_bus(variant):
-    """All SFX as separate stems (each NR long). Levels are peak dBFS except the crackle bed (RMS)."""
+def sfx_bus(variant, glint=False):
+    """All SFX as separate stems (each NR long). Levels are peak dBFS except the crackle bed (RMS).
+    glint: the chime under the end card's 'my love.' (off with the end card)."""
     z = lambda: np.zeros((NR, 2))  # noqa: E731
     out = {}
     tonal = variant == "full"
@@ -881,7 +883,8 @@ def sfx_bus(variant):
     for i, (f, fq) in enumerate(zip((149, 153, 157, 160), (6272.0, 5274.0, 5920.0, 6272.0))):   # embers airborne
         place(x, peak_to(ember_ping(fq, pans[i]), -32.0), S(f))
     out["embers"] = peak_to(reverb(x, sfx_verb, 0.18), -32.0)       # -32 dBFS including the room send
-    out["glint"] = place(z(), title_glint() * dbg(4.0), S(204))
+    if glint:
+        out["glint"] = place(z(), title_glint() * dbg(4.0), S(204))
     return out
 
 
@@ -1016,12 +1019,12 @@ def master(x, target_lufs, ceiling_db=-1.0):
     return x, lufs(x), true_peak_db(x)
 
 
-def render_mix(variant="full"):
+def render_mix(variant="full", glint=False):
     """Returns (mix NR-long pre-master, stems dict)."""
     if variant not in ("full", "sfx_only"):
         raise ValueError(f"unknown variant {variant!r}")
     stems = {}
-    sfx = sfx_bus(variant)
+    sfx = sfx_bus(variant, glint)
     breath_peak = sfx.pop("_breath_peak_frame")
     amb_c, amb_b = ambience()
     duck = duck_curve()[:, None]
@@ -1045,11 +1048,11 @@ def render_mix(variant="full"):
     return mix, stems
 
 
-def build(out_path, variant="full", target_lufs=None):
+def build(out_path, variant="full", target_lufs=None, glint=False):
     """Render the soundtrack to a 48 kHz / 24-bit stereo WAV of exactly N samples (340 frames).
 
-    target_lufs overrides the integrated target (default -14 full / -16 sfx_only)."""
-    mix, stems = render_mix(variant)
+    target_lufs overrides the integrated target (default -14 full / -16 sfx_only); glint = end-card chime."""
+    mix, stems = render_mix(variant, glint)
     x, gr = bus_compressor(dc_block(mix, 15.0))                       # safety net: no DC / infrasonics
     x = x * dbg(keys([(326, 0.0), (340, -14.0)]))[:, None]            # dip under the reverse swell into the loop
     x = x[:N]

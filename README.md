@@ -3,17 +3,25 @@
 **Deliverables** (`deliverables/`):
 - `reel_29_to_30.mp4`: the final reel (1080×1920, 30 fps, 11.3 s, original score, −14 LUFS).
 - `reel_29_to_30_no_music.mp4`: same picture with sound design only (−20 LUFS), for adding a song inside Instagram.
+- `reel_29_to_30_2x.mp4`, `reel_29_to_30_no_music_2x.mp4`: 2x-speed cuts (5.7 s; every other frame, same pitch).
+- `reel_29_to_30_share.mp4`: the reel at CRF 21 (about half the size) for sending on WhatsApp.
 - `reel_cover.jpg`: suggested Instagram cover (frame 300).
+
+**Revision 2026-10-09** (client notes: the black-and-white made her look "like an alien", make it an old
+black-and-white; remove "happy birthday, my love"). The memory is now an antique sepia print with her face
+re-shaded, and the reel ends without the end card or its chime. The source clips were not on hand, so these
+deliverables were refinished from the 10-08 render by `scripts/refinish_reel.py` (see its docstring). A full
+rebuild from the clips gets the same two changes from the pipeline itself (`fx.mono_antique`, end card off).
 
 A reproducible pipeline that turns two short phone clips (blowing out a **29** candle, then a **30** candle,
 filmed from different distances) into a 1080×1920 Instagram Reel with a seamless 29 → 30 transformation.
 
-**The story (11.3 s, loops):** the 29 plays as a silver black-and-white memory where only the candle flames
-keep their gold, under *"one last wish at 29"*. One slow camera push carries us from the farther 29 take to the
+**The story (11.3 s, loops):** the 29 plays as an antique sepia memory, like an old portrait print, where only
+the candle flames keep their gold, under *"one last wish at 29"*. One slow camera push carries us from the farther 29 take to the
 closer 30 take. Mid-blow, with both candles still lit, the "29" candle morphs into "30" (and the on-screen
 numeral rolls over like an odometer). The new 30 candle is the first thing in colour. She blows it out on the
 melody's high note, colour floods the night from the wick, the old film gate bursts open, and she laughs in
-slow motion under *"happy birthday, my love."*
+slow motion.
 
 ## How the "she's further away in 29" problem is solved
 
@@ -59,24 +67,28 @@ reel/analyze.py     frames, RVM mattes, mediapipe face landmarks, background cam
 reel/geometry.py    take-to-take transforms, colour match, clean plate, body pre-warp, luma LUT
 reel/rife.py        RIFE v4.25 interpolation + flow-morph with custom blend weights (CPU)
 reel/edit.py        the edit: time remaps (speed ramps), cameras, two-layer composite, morph, look
-reel/fx.py          grades (silver memory / golden present), flame re-lighting, blooms, grain, gate, particles
+reel/fx.py          grades (antique memory / golden present; the first cut's silver grade kept), flames, grain, gate
 reel/titles.py      animated typography (Instrument Serif), odometer numeral
 reel/soundtrack.py  original score (public-domain "Happy Birthday" arrangement) + synthesised sound design
 reel/render.py      canvas warp → Real-ESRGAN upscale → look → ffmpeg
-scripts/            setup, render, QA helpers
+scripts/            setup, render, build, QA helpers; refinish_reel.py re-grades/re-titles a finished render
 ```
 
 ## Run it
 
 ```bash
-scripts/setup.sh                          # deps, models (RIFE, RVM, mediapipe, Real-ESRGAN), fonts
+scripts/setup.sh                          # deps, models (RIFE, RVM, mediapipe, Real-ESRGAN), fonts, soundfont
 mkdir -p input && cp <29 clip> input/29.mov && cp <30 clip> input/30.mov
-python -m reel.analyze                    # ~1 min
+python -m reel.analyze                    # ~1 min; also candle tracks + work/timeline.json for the sound
 python scripts/render_reel.py --proxy     # 540x960 preview, ~10 min on 4 CPU cores
-python scripts/build_reel.py              # full 1080x1920 master + audio variants (~1 h on 4 CPU cores)
+python scripts/build_reel.py              # full 1080x1920 master, audio variants, 2x cuts (~1 h on 4 CPU cores)
 ```
 
-Options: `--name "Sara"` replaces "my love." with a name; `--no-titles` renders a clean master.
+On a Mac, `scripts/setup.sh` uses Homebrew and a Python 3.11 venv: run the steps with `.venv/bin/python`.
+Big local data lives in `*.nosync` folders (iCloud skips them; `work`, `models`, … link to them).
+
+Options: `--end-card` adds the "happy birthday, my love." end card (and its chime) back; `--name "Sara"` puts a
+name in place of "my love." (implies `--end-card`); `--no-titles` renders a clean master.
 The audio has a `sfx_only` variant (no music) for adding a trending sound inside Instagram.
 
 ## Credits & licences

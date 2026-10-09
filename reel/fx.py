@@ -451,6 +451,25 @@ def mono_silver(img, mix=(0.40, 0.48, 0.12), pts=((0, 0.04), (0.18, 0.18), (0.45
     return out
 
 
+def mono_antique(img, mix=(0.22, 0.60, 0.18), pts=((0, 0.085), (0.12, 0.15), (0.40, 0.42), (0.72, 0.72), (1, 0.89)),
+                 shadow=(1.20, 0.95, 0.70), highlight=(1.07, 1.0, 0.86), tone=1.0, diffusion=0.30, diffusion_px=9.0):
+    """'Antique memory' monochrome, like an old albumen portrait print: a red-shy mix (as on early film, so lips
+    and cheeks keep their shading; the red-leaning 'orange filter' mix washed her face flat), a soft-focus glow,
+    faded blacks and creamy rolled-off highlights, warm sepia toning (deep brown shadows, cream paper).
+    tone 0 = neutral grey, 1 = sepia, >1 = stronger brown. Toning keeps luminance (colours are luma-normalised)."""
+    y = img[..., 0] * mix[0] + img[..., 1] * mix[1] + img[..., 2] * mix[2]
+    if diffusion > 0:
+        b = cv2.GaussianBlur(y, (0, 0), diffusion_px * img.shape[1] / 1080)
+        y = y * (1 - diffusion) + np.maximum(y, b) * diffusion             # highlights bleed: soft-focus lens
+    y = curves(np.clip(y, 0, 1), list(pts))
+    rec709 = np.array([0.2126, 0.7152, 0.0722], np.float32)
+    sh, hi = np.array(shadow, np.float32), np.array(highlight, np.float32)
+    sh, hi = sh / (sh @ rec709), hi / (hi @ rec709)
+    w = y[..., None]
+    tint = 1 + (sh * (1 - w) + hi * w - 1) * tone
+    return np.clip(w * tint, 0, 1)
+
+
 def flicker_smooth(k, amount=0.012, fps=30.0, seed=4):
     """Exposure flicker as smooth noise below 6 Hz (sum of slow sines), never frame-random."""
     r = np.random.default_rng(seed)

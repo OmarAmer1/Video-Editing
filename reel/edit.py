@@ -1,11 +1,12 @@
 """The edit: "Thirty, in One Breath" — 29 -> 30 birthday reel (1080x1920, 30 fps, 340 frames, loops).
 
-Story: the 29 take plays as a silver black-and-white memory where only the candle flames keep their gold.
+Story: the 29 take plays as an antique sepia memory (an old portrait print) where only the candle flames keep
+their gold.
 One continuous camera push carries us from the farther 29 take to the closer 30 take (two-layer registration:
 her foreground is face-locked, the background is background-locked onto a clean plate, so neither jumps).
 Mid-blow, both candles still lit, the "29" morphs into the "30" (RIFE flow morph), and the 30 candle is the
 first thing in colour. She blows it out on the melody's high note: colour floods the night from the wick,
-the old film gate bursts open, and she laughs in slow motion under "happy birthday, my love."
+the old film gate bursts open, and she laughs in slow motion (no end card unless titles are built with one).
 
 All creative timings live in CFG (output frame numbers at 30 fps unless noted).
 """
@@ -290,9 +291,9 @@ class Edit:
 
     # ------------------------------------------------------------------ look
     def colour_mask(self, k, img, centre, wick):
-        """0 = silver memory, 1 = golden present.
+        """0 = antique memory, 1 = golden present.
         Stage 1 (f110-120): the new '30' candle and the cake-top decoration turn colour as one object (keyed by
-        wax brightness / berry red / gold leaf inside a small ellipse; the hijab and hands stay silver).
+        wax brightness / berry red / gold leaf inside a small ellipse; the hijab and hands stay sepia).
         Stage 2 (the drop, f140+): colour radiates from the wick across the whole frame."""
         c = self.cfg
         H, W = img.shape[:2]
@@ -400,7 +401,7 @@ class Edit:
         # the two worlds
         cmin, cmax = float(cmask.min()), float(cmask.max())
         if cmin < 1:
-            past = fx.mono_silver(base)
+            past = fx.mono_antique(base)
             past = fx.flame_glow(past, flame, strength=1.0 * surge, px=px)
         if cmax > 0:
             present = fx.present_grade_v2(base)

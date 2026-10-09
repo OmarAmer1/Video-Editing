@@ -3,12 +3,29 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-sudo_if() { if [ "$(id -u)" = 0 ]; then "$@"; else sudo "$@"; fi; }
-sudo_if apt-get install -y ffmpeg fluidsynth fluid-soundfont-gm libegl1 libgles2 >/dev/null
-pip install -q numpy scipy opencv-python-headless pillow onnxruntime torch mediapipe mido pyloudnorm soundfile
-
+if [ "$(uname)" = Darwin ]; then   # ~/Documents syncs to iCloud: keep big local data in *.nosync folders
+  for d in models fonts work input output; do [ -e "$d" ] || { mkdir -p "$d.nosync" && ln -s "$d.nosync" "$d"; }; done
+fi
 mkdir -p models fonts
 dl() { [ -s "$2" ] || curl -fL --retry 3 -o "$2" "$1"; }
+
+if [ "$(uname)" = Darwin ]; then
+  # Mac: Homebrew tools, a Python 3.11 venv, and the same FluidR3_GM soundfont Debian ships (into models/)
+  brew install ffmpeg fluid-synth python@3.11
+  [ -x .venv/bin/python ] || { /opt/homebrew/bin/python3.11 -m venv .venv.nosync && ln -sfn .venv.nosync .venv; }
+  .venv/bin/pip install -q numpy scipy opencv-python-headless pillow onnxruntime torch mediapipe mido pyloudnorm soundfile
+  if [ ! -s models/FluidR3_GM.sf2 ]; then
+    tmp=$(mktemp -d)
+    dl http://deb.debian.org/debian/pool/main/f/fluid-soundfont/fluid-soundfont-gm_3.1-5.3_all.deb "$tmp/gm.deb"
+    (cd "$tmp" && ar x gm.deb && tar -xf data.tar.*)
+    cp "$tmp/usr/share/sounds/sf2/FluidR3_GM.sf2" models/
+    rm -rf "$tmp"
+  fi
+else
+  sudo_if() { if [ "$(id -u)" = 0 ]; then "$@"; else sudo "$@"; fi; }
+  sudo_if apt-get install -y ffmpeg fluidsynth fluid-soundfont-gm libegl1 libgles2 >/dev/null
+  pip install -q numpy scipy opencv-python-headless pillow onnxruntime torch mediapipe mido pyloudnorm soundfile
+fi
 dl https://github.com/HolyWu/vs-rife/releases/download/model/flownet_v4.25.pkl models/flownet_v4.25.pkl
 dl https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_resnet50_fp32.onnx models/rvm_resnet50_fp32.onnx
 dl https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task models/face_landmarker.task

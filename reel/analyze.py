@@ -18,7 +18,7 @@ def extract_frames(clip, src):
     d = paths.frames_dir(clip)
     d.mkdir(parents=True, exist_ok=True)
     if not any(d.glob("*.png")):
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-vsync", "0", str(d / "%04d.png")], check=True)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-fps_mode", "passthrough", str(d / "%04d.png")], check=True)
     return sorted(d.glob("*.png"))
 
 
@@ -125,23 +125,6 @@ def load():
     return json.loads((paths.WORK / "analysis.json").read_text())
 
 
-def main():
-    paths.WORK.mkdir(parents=True, exist_ok=True)
-    out = {}
-    for clip, src in CLIPS.items():
-        files = extract_frames(clip, src)
-        print(f"[{clip}] {len(files)} frames; matting...")
-        run_matting(clip, files)
-        print(f"[{clip}] faces...")
-        faces = run_faces(files)
-        print(f"[{clip}] background motion...")
-        out[clip] = dict(n=len(files), faces=faces, bg=run_bg_motion(clip, files))
-    (paths.WORK / "analysis.json").write_text(json.dumps(out))
-    print("wrote", paths.WORK / "analysis.json")
-
-
-if __name__ == "__main__":
-    main()
 
 
 def track_point(clip, ref, pt, box=26):
@@ -176,3 +159,53 @@ CANDLE_REF = {"c29": (40, (233.0, 352.0)), "c30": (61, (228.0, 436.0))}
 
 def candle_tracks():
     return {clip: track_point(clip, ref, pt) for clip, (ref, pt) in CANDLE_REF.items()}
+
+
+def write_timeline(an):
+    """Per output frame, the face on screen and its mouth pucker (the breath bed of the sound design follows it).
+
+    Writes WORK/timeline.json: {"frames": [{"clip", "f", "pucker"}, ...]}; the morph frames blend C39 and B61."""
+    from .edit import CFG
+    from .timeline import SpeedRamp
+
+    def pucker(clip, f):
+        known = [(i, r["pucker"]) for i, r in enumerate(an[clip]["faces"]) if r is not None]
+        return float(np.interp(f, [i for i, _ in known], [v for _, v in known]))
+
+    r29, r30 = SpeedRamp(CFG["c29_speed"], CFG["c29_anchor"]), SpeedRamp(CFG["c30_speed"], CFG["c30_anchor"])
+    (m0, m1), (ci, bi) = CFG["morph"], CFG["pair"]
+    rows = []
+    for k in range(CFG["n_frames"]):
+        t = k / CFG["fps"]
+        if k < m0:
+            rows.append(dict(clip="c29", f=r29(t), pucker=pucker("c29", r29(t))))
+        elif k <= m1:
+            u = (k - m0) / (m1 - m0)
+            w = u ** 3 * (u * (6 * u - 15) + 10)                          # the morph's smootherstep
+            rows.append(dict(clip="morph", f=None, pucker=pucker("c29", ci) * (1 - w) + pucker("c30", bi) * w))
+        else:
+            f = min(r30(t), 122.0)
+            rows.append(dict(clip="c30", f=f, pucker=pucker("c30", f)))
+    (paths.WORK / "timeline.json").write_text(json.dumps(dict(frames=rows)))
+
+
+def main():
+    paths.WORK.mkdir(parents=True, exist_ok=True)
+    out = {}
+    for clip, src in CLIPS.items():
+        files = extract_frames(clip, src)
+        print(f"[{clip}] {len(files)} frames; matting...")
+        run_matting(clip, files)
+        print(f"[{clip}] faces...")
+        faces = run_faces(files)
+        print(f"[{clip}] background motion...")
+        out[clip] = dict(n=len(files), faces=faces, bg=run_bg_motion(clip, files))
+    print("candle tracks...")
+    out["candle"] = candle_tracks()
+    (paths.WORK / "analysis.json").write_text(json.dumps(out))
+    write_timeline(out)
+    print("wrote", paths.WORK / "analysis.json", "and timeline.json")
+
+
+if __name__ == "__main__":
+    main()

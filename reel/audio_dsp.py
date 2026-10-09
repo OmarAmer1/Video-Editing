@@ -10,7 +10,11 @@ import numpy as np
 from scipy import signal
 
 SR = 48000
-SOUNDFONT = os.environ.get("REEL_SF2", "/usr/share/sounds/sf2/FluidR3_GM.sf2")
+# Debian/Ubuntu install it system-wide (fluid-soundfont-gm); on a Mac scripts/setup.sh puts it in models/
+_SF2_SYSTEM = "/usr/share/sounds/sf2/FluidR3_GM.sf2"
+SOUNDFONT = os.environ.get("REEL_SF2", _SF2_SYSTEM if os.path.exists(_SF2_SYSTEM) else
+                           os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models",
+                                        "FluidR3_GM.sf2"))
 
 
 def silence(dur):

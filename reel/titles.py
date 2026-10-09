@@ -13,7 +13,8 @@ Implements final_edl.json["typography"] (plus the TXT notes of the timeline):
            glyph centre and rate-limited to the f142-f150 ramp (the bloom front alone crosses it in ~1 frame), with an
            inner glow #FFB866 (10 px) pulsing 25 % -> 45 % -> 25 %. Exit f186-f198 (blur 0->12, opacity ->0,
            scale 1.0->0.97).
-  end card 'happy birthday,'    Italic 56 px, #F4EBDD @ 95 %, x 74, baseline 284; 'happy' f176-f190, 'birthday,' f184-f198.
+  end card (off by default since the client asked to remove it; Titles(end_card=True) brings it back)
+           'happy birthday,'    Italic 56 px, #F4EBDD @ 95 %, x 74, baseline 284; 'happy' f176-f190, 'birthday,' f184-f198.
            'my love.'           Italic 92 px, gold #E8C78E + inner glow #FFB866 (10 px, 25 %), x 72, baseline 420;
                                 'my' f200-f214, 'love.' f207-f221; glow pulse 25 % -> 45 % -> 25 % centred on f260.
   Everything fades out f328-f339.
@@ -202,10 +203,11 @@ class _Sprite:
 class Titles:
     """All on-screen text of the reel as a premultiplied RGBA layer per output frame."""
 
-    def __init__(self, out_size=(1080, 1920), name=None):
+    def __init__(self, out_size=(1080, 1920), name=None, end_card=False):
         self.W, self.H = int(out_size[0]), int(out_size[1])
         self.s = self.W / 1080.0
         self.name = name
+        self.end_card = end_card
         self.nudge = {}                       # element -> (dx, dy, scale) from fit_to_matte(); 1080-space px
         s2 = self.s * SS
         sp = SPEC
@@ -414,6 +416,8 @@ class Titles:
                 blur=n["rack_blur"] * (1 - p_in) + n["exit_blur"] * q, sc=sc, centre=centre, col=col, glow=glow)
 
         # 3) end card
+        if not self.end_card:
+            return items
         e1 = sp["end1"]
         if k >= e1["windows"][0][0]:
             for spr, (a0, a1) in zip(self._end1, e1["windows"]):

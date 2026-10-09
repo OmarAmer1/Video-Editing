@@ -1,8 +1,11 @@
 # Large/derived/private data — regenerate with scripts/setup.sh and the pipeline
-work/
-models/
-fonts/
-input/
-output/
+# (no trailing slash: on a Mac these are links to *.nosync folders that iCloud skips)
+work
+models
+fonts
+input
+output
+*.nosync
+.venv
 __pycache__/
 *.pyc
